@@ -64,7 +64,40 @@ export const isOverlapping = (newTimeRange, existingEvents) => {
     const eventRange = parseTimeRange(event.time);
     if (!eventRange) return false;
 
-    // Overlap Condition: StartA < EndB AND EndA > StartB
+    // Check if the two ranges overlap
     return newRange.start < eventRange.end && newRange.end > eventRange.start;
   });
+};
+
+/**
+ * Returns the current time in minutes from midnight.
+ * @returns {number}
+ */
+export const getCurrentTimeMinutes = () => {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
+};
+
+/**
+ * Checks if the current time is within the given time range.
+ * @param {string} timeRange - "HH:MM - HH:MM"
+ * @returns {boolean}
+ */
+export const isTimeCurrent = (timeRange) => {
+  const range = parseTimeRange(timeRange);
+  if (!range) return false;
+  const current = getCurrentTimeMinutes();
+  return current >= range.start && current < range.end;
+};
+
+/**
+ * Checks if the time range is in the future (starts after current time).
+ * @param {string} timeRange
+ * @returns {boolean}
+ */
+export const isTimeUpcoming = (timeRange) => {
+  const range = parseTimeRange(timeRange);
+  if (!range) return false;
+  const current = getCurrentTimeMinutes();
+  return range.start > current;
 };
