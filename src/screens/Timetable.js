@@ -1,4 +1,4 @@
-import React, { useState, useContext, useMemo } from "react";
+import React, { useState, useContext, useMemo, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import TimePickerModal from "../components/TimePickerModal";
+import DatePickerModal from "../components/DatePickerModal";
 import { AppContext } from "../context/AppContext";
 import {
   isOverlapping,
@@ -38,17 +39,38 @@ const THAI_MONTHS = [
 ];
 
 const Timetable = () => {
-  const { courses, addCourse, exams, simulatedDate } = useContext(AppContext);
+  const {
+    courses,
+    addCourse,
+    deleteCourse,
+    exams,
+    addExam,
+    deleteExam,
+    makeupClasses,
+    addMakeupClass,
+    deleteMakeupClass,
+    simulatedDate,
+  } = useContext(AppContext);
 
   const [mode, setMode] = useState("Timetable");
   const [modalVisible, setModalVisible] = useState(false);
   const [newCourseName, setNewCourseName] = useState("");
+  const [newCourseCode, setNewCourseCode] = useState("");
+  const [room, setRoom] = useState("");
 
   // Time Picker State
   const [startTime, setStartTime] = useState(new Date());
   const [endTime, setEndTime] = useState(new Date());
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
+
+  // Date/Day Picker State
+  const [targetDay, setTargetDay] = useState("Mon"); // For Course
+  const [examDate, setExamDate] = useState(new Date()); // For Exam
+  const [showDatePicker, setShowDatePicker] = useState(false); // For Exam Date
+
+  // Subject Selector State (for Exams)
+  const [showSubjectSelector, setShowSubjectSelector] = useState(false);
 
   // Dynamic calendar strip based on simulatedDate
   const calendarWeek = useMemo(() => {
@@ -105,13 +127,25 @@ const Timetable = () => {
     return `${hours}:${minutes}`;
   };
 
-  const handleAddCourse = () => {
+  const formatDate = (date) => {
+    const day = date.getDate().toString().padStart(2, "0");
+    const month = THAI_MONTHS[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
+
+  const handleAdd = () => {
     const formattedStart = formatTime(startTime);
     const formattedEnd = formatTime(endTime);
     const timeRange = `${formattedStart} - ${formattedEnd}`;
 
-    if (!newCourseName) {
+    if (!newCourseName.trim()) {
       Alert.alert("Error", "กรุณากรอกชื่อวิชา");
+      return;
+    }
+
+    if (!room.trim()) {
+      Alert.alert("Error", "กรุณากรอกห้องเรียน");
       return;
     }
 
@@ -120,36 +154,91 @@ const Timetable = () => {
       return;
     }
 
-    // Check for conflicts
-    const dayCourses = courses.filter((c) => c.day === selectedDay);
+    if (mode === "Makeup") {
+      const newMakeup = {
+        id: Date.now().toString(),
+        code: newCourseCode || "88888888",
+        name: newCourseName,
+        time: timeRange,
+        room: room,
+        // date: formatDate(examDate), // Use examDate for specific date
+        rawDate: examDate,
+      };
+      // We need to store full date for makeup
+      const y = examDate.getFullYear();
+      const m = (examDate.getMonth() + 1).toString().padStart(2, "0");
+      const d = examDate.getDate().toString().padStart(2, "0");
+      newMakeup.dateString = `${y}-${m}-${d}`;
 
-    if (isOverlapping(timeRange, dayCourses)) {
-      Alert.alert(
-        "Conflict Detected",
-        "ช่วงเวลานี้ซ้อนทับกับวิชาที่มีอยู่แล้ว",
-      );
+      addMakeupClass(newMakeup);
+      Alert.alert("สำเร็จ", "เพิ่มเรียนชดเชยเรียบร้อย");
+
+      setModalVisible(false);
+      setNewCourseName("");
+      setNewCourseCode("");
+      setRoom("");
       return;
     }
 
-    const newCourse = {
-      id: Date.now().toString(),
-      code: "99999999",
-      name: newCourseName,
-      time: timeRange,
-      room: "TBA",
-      day: selectedDay,
-    };
+    if (mode === "Timetable") {
+      // Add Course
+      const dayCourses = courses.filter((c) => c.day === targetDay);
+      if (isOverlapping(timeRange, dayCourses)) {
+        Alert.alert("Conflict", "เวลานี้ซ้อนทับกับวิชาที่มีอยู่");
+        return;
+      }
 
-    addCourse(newCourse);
+      const newCourse = {
+        id: Date.now().toString(),
+        code: newCourseCode || "00000000",
+        name: newCourseName,
+        time: timeRange,
+        room: room,
+        day: targetDay,
+      };
+      addCourse(newCourse);
+      Alert.alert("สำเร็จ", "เพิ่มวิชาเรียนเรียบร้อย");
+    } else {
+      // Add Exam
+      // Format date to YYYY-MM-DD for storage
+      const y = examDate.getFullYear();
+      const m = (examDate.getMonth() + 1).toString().padStart(2, "0");
+      const d = examDate.getDate().toString().padStart(2, "0");
+      const dateStr = `${y}-${m}-${d}`;
+
+      const newExam = {
+        id: Date.now(),
+        subject: newCourseName,
+        code: newCourseCode || "00000000",
+        date: dateStr,
+        time: timeRange,
+        room: room,
+      };
+      addExam(newExam);
+      Alert.alert("สำเร็จ", "เพิ่มการสอบเรียบร้อย");
+    }
+
     setModalVisible(false);
     setNewCourseName("");
-    Alert.alert("สำเร็จ", "เพิ่มวิชาเรียบร้อยแล้ว");
+    setNewCourseCode("");
+    setRoom("");
+  };
+
+  const handleSelectSubject = (course) => {
+    setNewCourseName(course.name);
+    setNewCourseCode(course.code);
+    // setRoom(course.room || ""); // Auto-fill disabled
+    setShowSubjectSelector(false);
   };
 
   const onChangeStart = (selectedDate) => {
     setShowStartPicker(false);
     if (selectedDate) {
       setStartTime(selectedDate);
+      // Auto-set end time to start time + 1 hour for convenience
+      const newEnd = new Date(selectedDate);
+      newEnd.setHours(selectedDate.getHours() + 1);
+      setEndTime(newEnd);
     }
   };
 
@@ -160,10 +249,48 @@ const Timetable = () => {
     }
   };
 
+  const confirmDelete = (item, type) => {
+    Alert.alert(
+      "ยืนยันการลบ",
+      `คุณต้องการลบ ${type === "course" ? "วิชาเรียน" : type === "makeup" ? "เรียนชดเชย" : "การสอบ"} นี้ใช่หรือไม่?`,
+      [
+        { text: "ยกเลิก", style: "cancel" },
+        {
+          text: "ลบ",
+          style: "destructive",
+          onPress: () => {
+            if (type === "course") {
+              deleteCourse(item.id);
+            } else if (type === "makeup") {
+              deleteMakeupClass(item.id);
+            } else {
+              deleteExam(item.id); // Ensure ID is correct type
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // ---- Timetable Mode Data ----
   const todayCourses = useMemo(() => {
-    return courses
+    // 1. Regular courses for this day of week
+    const regular = courses
       .filter((c) => c.day === selectedDay)
+      .map((c) => ({ ...c, type: "regular" }));
+
+    // 2. Makeup classes for this specific date
+    const y = simulatedDate.getFullYear();
+    const m = (simulatedDate.getMonth() + 1).toString().padStart(2, "0");
+    const d = simulatedDate.getDate().toString().padStart(2, "0");
+    const dateStr = `${y}-${m}-${d}`;
+
+    const makeups = makeupClasses
+      .filter((m) => m.dateString === dateStr)
+      .map((m) => ({ ...m, type: "makeup" }));
+
+    // Merge and sort by time
+    const all = [...regular, ...makeups]
       .map((c) => {
         const timeParts = c.time.replace(/\s/g, "").split("-");
         const [h, m] = (timeParts[0] || "0:0").split(/[:.]/);
@@ -171,7 +298,8 @@ const Timetable = () => {
         return { ...c, startMin };
       })
       .sort((a, b) => a.startMin - b.startMin);
-  }, [courses, selectedDay]);
+    return all;
+  }, [courses, makeupClasses, selectedDay, simulatedDate]);
 
   const nowStudying = todayCourses.find((c) => isTimeCurrent(c.time));
   const nextCourses = todayCourses.filter((c) => isTimeUpcoming(c.time));
@@ -203,12 +331,42 @@ const Timetable = () => {
       });
   }, [exams, simulatedDate]);
 
-  // Split exams into "currently happening" (first one) and "upcoming" (rest)
-  const currentExam = examData.length > 0 ? examData[0] : null;
-  const upcomingExams = examData.length > 1 ? examData.slice(1) : [];
+  // Separate into Upcoming (including today upcoming) and Completed
+  const upcomingExams = useMemo(() => {
+    const now = new Date(simulatedDate);
+    return examData.filter((e) => {
+      // Parse start time to get specific comparable time
+      const [h, m] = e.time.split("-")[0].trim().split(/[:.]/).map(Number);
+      const examTime = new Date(e.examDate);
+      examTime.setHours(h, m, 0, 0);
+      return examTime >= now;
+    });
+  }, [examData, simulatedDate]);
+
+  const completedExams = useMemo(() => {
+    const now = new Date(simulatedDate);
+    return examData
+      .filter((e) => {
+        const [h, m] = e.time.split("-")[0].trim().split(/[:.]/).map(Number);
+        const examTime = new Date(e.examDate);
+        examTime.setHours(h, m, 0, 0);
+        return examTime < now;
+      })
+      .sort((a, b) => b.examDate - a.examDate); // Show recent completed first
+  }, [examData, simulatedDate]);
 
   // Is today highlighted in calendar (for visual)
   const todayKey = DAYS_SHORT[simulatedDate.getDay()];
+
+  // Unique subjects for selector
+  const uniqueSubjects = useMemo(() => {
+    const seen = new Set();
+    return courses.filter((c) => {
+      const duplicate = seen.has(c.code + c.name);
+      seen.add(c.code + c.name);
+      return !duplicate;
+    });
+  }, [courses]);
 
   return (
     <View style={styles.container}>
@@ -308,21 +466,43 @@ const Timetable = () => {
                 <View style={styles.timelineRow}>
                   <View style={styles.timelineLine} />
                   <View style={styles.cardContainer}>
-                    <View style={styles.cardAccent} />
-                    <View style={styles.cardContent}>
-                      <View style={styles.cardHeader}>
-                        <View style={styles.codeBadge}>
-                          <Text style={styles.codeText}>
-                            {nowStudying.code}
+                    <TouchableOpacity
+                      style={styles.cardContent} // Use cardContent style but wrap in Touchable
+                      onLongPress={() =>
+                        confirmDelete(
+                          nowStudying,
+                          nowStudying.type === "makeup" ? "makeup" : "course",
+                        )
+                      }
+                    >
+                      <View
+                        style={[
+                          styles.cardAccent,
+                          {
+                            backgroundColor:
+                              nowStudying.type === "makeup"
+                                ? "#FFF176"
+                                : "#E0F2F1",
+                          },
+                        ]}
+                      />
+                      <View style={{ flex: 1, padding: 15 }}>
+                        <View style={styles.cardHeader}>
+                          <View style={styles.codeBadge}>
+                            <Text style={styles.codeText}>
+                              {nowStudying.code}
+                            </Text>
+                          </View>
+                          <Text style={styles.timeText}>
+                            {nowStudying.time} น.
                           </Text>
                         </View>
-                        <Text style={styles.timeText}>
-                          {nowStudying.time} น.
+                        <Text style={styles.courseName}>
+                          {nowStudying.name}
                         </Text>
+                        <Text style={styles.roomText}>{nowStudying.room}</Text>
                       </View>
-                      <Text style={styles.courseName}>{nowStudying.name}</Text>
-                      <Text style={styles.roomText}>{nowStudying.room}</Text>
-                    </View>
+                    </TouchableOpacity>
                   </View>
                 </View>
               </View>
@@ -336,8 +516,8 @@ const Timetable = () => {
               </View>
 
               {nextCourses.length > 0
-                ? nextCourses.map((course, index) => (
-                    <View key={course.id} style={styles.timelineRow}>
+                ? nextCourses.map((c, index) => (
+                    <View key={c.id} style={styles.timelineRow}>
                       <View
                         style={[
                           styles.timelineLine,
@@ -346,21 +526,52 @@ const Timetable = () => {
                           },
                         ]}
                       />
-                      <View style={styles.cardContainer}>
-                        <View style={styles.cardAccent} />
+                      <TouchableOpacity
+                        style={styles.cardContainer}
+                        onLongPress={() =>
+                          confirmDelete(
+                            c,
+                            c.type === "makeup" ? "makeup" : "course",
+                          )
+                        }
+                      >
+                        {c.type === "makeup" && (
+                          <View
+                            style={{
+                              position: "absolute",
+                              top: 5,
+                              right: 5,
+                              backgroundColor: "#FFF176",
+                              paddingHorizontal: 5,
+                              borderRadius: 4,
+                            }}
+                          >
+                            <Text style={{ fontSize: 10, fontWeight: "bold" }}>
+                              ชดเชย
+                            </Text>
+                          </View>
+                        )}
+
+                        <View
+                          style={[
+                            styles.cardAccent,
+                            {
+                              backgroundColor:
+                                c.type === "makeup" ? "#FFF176" : "#E0F2F1",
+                            },
+                          ]}
+                        />
                         <View style={styles.cardContent}>
                           <View style={styles.cardHeader}>
                             <View style={styles.codeBadge}>
-                              <Text style={styles.codeText}>{course.code}</Text>
+                              <Text style={styles.codeText}>{c.code}</Text>
                             </View>
-                            <Text style={styles.timeText}>
-                              {course.time} น.
-                            </Text>
+                            <Text style={styles.timeText}>{c.time} น.</Text>
                           </View>
-                          <Text style={styles.courseName}>{course.name}</Text>
-                          <Text style={styles.roomText}>{course.room}</Text>
+                          <Text style={styles.courseName}>{c.name}</Text>
+                          <Text style={styles.roomText}>{c.room}</Text>
                         </View>
-                      </View>
+                      </TouchableOpacity>
                     </View>
                   ))
                 : !nowStudying && (
@@ -379,120 +590,284 @@ const Timetable = () => {
         ) : (
           // EXAM MODE - Data from AppContext
           <>
-            {/* Currently Examining */}
-            {currentExam && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeaderRow}>
-                  <View style={styles.dot} />
-                  <Text style={styles.sectionTitle}>กำลังสอบอยู่</Text>
-                </View>
-
-                <View style={styles.timelineRow}>
-                  <View style={styles.timelineLine} />
-                  <View style={styles.cardContainer}>
-                    <View
-                      style={[
-                        styles.cardAccent,
-                        { backgroundColor: currentExam.accent },
-                      ]}
-                    />
-                    <View style={styles.cardContent}>
-                      <View style={styles.cardHeader}>
-                        <View style={styles.codeBadge}>
-                          <Text style={styles.codeText}>
-                            {currentExam.code}
-                          </Text>
-                        </View>
-                        <Text style={styles.timeText}>
-                          {currentExam.time} น.
-                        </Text>
-                      </View>
-                      <Text style={styles.courseName}>{currentExam.name}</Text>
-                      <Text style={styles.roomText}>{currentExam.room}</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {/* Next Exams */}
+            {/* Next Exams (Upcoming) */}
             <View style={styles.section}>
               <View style={styles.sectionHeaderRow}>
                 <View style={styles.dot} />
-                <Text style={styles.sectionTitle}>วิชาถัดไป</Text>
+                <Text style={styles.sectionTitle}>การสอบที่กำลังจะมาถึง</Text>
               </View>
 
-              {upcomingExams.length > 0
-                ? upcomingExams.map((exam, index) => (
-                    <View key={exam.id} style={styles.timelineRow}>
+              {upcomingExams.length > 0 ? (
+                upcomingExams.map((exam, index) => (
+                  <View key={exam.id} style={styles.timelineRow}>
+                    <View
+                      style={[
+                        styles.timelineLine,
+                        index === upcomingExams.length - 1 && {
+                          backgroundColor: "transparent",
+                        },
+                      ]}
+                    />
+                    <TouchableOpacity
+                      style={styles.cardContainer}
+                      onLongPress={() => confirmDelete(exam, "exam")}
+                    >
                       <View
                         style={[
-                          styles.timelineLine,
-                          index === upcomingExams.length - 1 && {
-                            backgroundColor: "transparent",
-                          },
+                          styles.cardAccent,
+                          { backgroundColor: exam.accent },
                         ]}
                       />
-                      <View style={styles.cardContainer}>
-                        <View
-                          style={[
-                            styles.cardAccent,
-                            { backgroundColor: exam.accent },
-                          ]}
-                        />
-                        <View style={styles.cardContent}>
-                          <View style={styles.cardHeader}>
-                            <View style={styles.codeBadge}>
-                              <Text style={styles.codeText}>{exam.code}</Text>
-                            </View>
-                            <Text style={styles.timeText}>{exam.time} น.</Text>
+                      <View style={styles.cardContent}>
+                        <View style={styles.cardHeader}>
+                          <View style={styles.codeBadge}>
+                            <Text style={styles.codeText}>{exam.code}</Text>
                           </View>
-                          <Text style={styles.courseName}>{exam.name}</Text>
-                          <Text style={styles.roomText}>{exam.room}</Text>
+                          <Text style={styles.timeText}>
+                            {formatDate(exam.examDate)} {exam.time} น.
+                          </Text>
                         </View>
+                        <Text style={styles.courseName}>{exam.name}</Text>
+                        <Text style={styles.roomText}>{exam.room}</Text>
                       </View>
-                    </View>
-                  ))
-                : !currentExam && (
-                    <Text
-                      style={{
-                        textAlign: "center",
-                        color: "#999",
-                        marginTop: 20,
-                      }}
-                    >
-                      ไม่มีการสอบ
-                    </Text>
-                  )}
+                    </TouchableOpacity>
+                  </View>
+                ))
+              ) : (
+                <Text
+                  style={{
+                    textAlign: "center",
+                    color: "#999",
+                    marginTop: 20,
+                    marginBottom: 20,
+                  }}
+                >
+                  ไม่มีการสอบที่กำลังจะมาถึง
+                </Text>
+              )}
             </View>
+
+            {/* Completed Exams */}
+            {completedExams.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeaderRow}>
+                  <View style={[styles.dot, { backgroundColor: "#999" }]} />
+                  <Text style={[styles.sectionTitle, { color: "#999" }]}>
+                    การสอบที่ผ่านมาแล้ว
+                  </Text>
+                </View>
+
+                {completedExams.map((exam, index) => (
+                  <View key={exam.id} style={styles.timelineRow}>
+                    <View
+                      style={[
+                        styles.timelineLine,
+                        { backgroundColor: "#EEE" },
+                        index === completedExams.length - 1 && {
+                          backgroundColor: "transparent",
+                        },
+                      ]}
+                    />
+                    <TouchableOpacity
+                      style={[styles.cardContainer, { opacity: 0.7 }]}
+                      onLongPress={() => confirmDelete(exam, "exam")}
+                    >
+                      <View
+                        style={[styles.cardAccent, { backgroundColor: "#DDD" }]}
+                      />
+                      <View style={styles.cardContent}>
+                        <View style={styles.cardHeader}>
+                          <View
+                            style={[
+                              styles.codeBadge,
+                              { backgroundColor: "#EEE" },
+                            ]}
+                          >
+                            <Text style={[styles.codeText, { color: "#888" }]}>
+                              {exam.code}
+                            </Text>
+                          </View>
+                          <Text style={styles.timeText}>
+                            {formatDate(exam.examDate)} {exam.time} น.
+                          </Text>
+                        </View>
+                        <Text style={[styles.courseName, { color: "#666" }]}>
+                          {exam.name}
+                        </Text>
+                        <Text style={[styles.roomText, { color: "#888" }]}>
+                          {exam.room}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
           </>
         )}
+
+        {/* Inline Add Button */}
+        <View style={{ marginBottom: 40 }}>
+          {mode === "Timetable" && (
+            <TouchableOpacity
+              style={[
+                styles.addBtnInline,
+                { backgroundColor: "#FBC02D", marginBottom: 10 },
+              ]}
+              onPress={() => {
+                setMode("Makeup"); // Special internal mode or just state
+                setModalVisible(true);
+                // Reset fields handled by open
+              }}
+            >
+              <Ionicons name="add-circle" size={24} color="#000" />
+              <Text style={[styles.addBtnInlineText, { color: "#000" }]}>
+                เพิ่มเรียนชดเชย
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={styles.addBtnInline}
+            onPress={() => {
+              if (mode === "Makeup") setMode("Timetable"); // Reset if needed, but actually we use state to switch logic.
+              // Wait, logic needs to know which button was pressed.
+              // Let's control 'mode' state in the Modal or a separate state 'addType'.
+              // Simpler: Just set a state 'isMakeup(true)' when yellow clicked.
+              setModalVisible(true);
+              setTargetDay(selectedDay);
+            }}
+          >
+            <Ionicons name="add-circle" size={24} color="#fff" />
+            <Text style={styles.addBtnInlineText}>
+              {mode === "Timetable" ? "เพิ่มวิชาเรียน" : "เพิ่มการสอบ"}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setModalVisible(true)}
-      >
-        <Ionicons name="add" size={30} color="#fff" />
-      </TouchableOpacity>
-
-      {/* Add Course Modal */}
+      {/* Add Course/Exam Modal */}
       <Modal
         animationType="slide"
         transparent={true}
         visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => {
+          setModalVisible(false);
+          if (mode === "Makeup") setMode("Timetable"); // Restore
+        }}
       >
         <View style={styles.centeredView}>
           <View style={styles.modalView}>
-            <Text style={styles.modalText}>เพิ่มวิชาเรียน</Text>
+            <Text style={styles.modalText}>
+              {mode === "Timetable"
+                ? "เพิ่มวิชาเรียน"
+                : mode === "Makeup"
+                  ? "เพิ่มเรียนชดเชย"
+                  : "เพิ่มการสอบ"}
+            </Text>
+
+            {mode === "Timetable" && (
+              <TextInput
+                style={styles.input}
+                placeholder="รหัสวิชา (เช่น 01418342)"
+                value={newCourseCode}
+                onChangeText={setNewCourseCode}
+                keyboardType="numeric"
+              />
+            )}
+
+            {mode === "Makeup" ? (
+              <TouchableOpacity
+                style={styles.subjectSelectorBtn}
+                onPress={() => setShowSubjectSelector(true)}
+              >
+                <Text
+                  style={
+                    newCourseName
+                      ? styles.subjectSelectorTextSelected
+                      : styles.subjectSelectorTextPlaceholder
+                  }
+                >
+                  {newCourseName || "เลือกวิชาที่สอนชดเชย"}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#666" />
+              </TouchableOpacity>
+            ) : mode === "Exam" ? (
+              <TouchableOpacity
+                style={styles.subjectSelectorBtn}
+                onPress={() => setShowSubjectSelector(true)}
+              >
+                <Text
+                  style={
+                    newCourseName
+                      ? styles.subjectSelectorTextSelected
+                      : styles.subjectSelectorTextPlaceholder
+                  }
+                >
+                  {newCourseName
+                    ? `${newCourseCode} ${newCourseName}`
+                    : "เลือกวิชาที่เรียน"}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#666" />
+              </TouchableOpacity>
+            ) : (
+              <TextInput
+                style={styles.input}
+                placeholder="ชื่อวิชา"
+                value={newCourseName}
+                onChangeText={setNewCourseName}
+              />
+            )}
             <TextInput
               style={styles.input}
-              placeholder="ชื่อวิชา"
-              value={newCourseName}
-              onChangeText={setNewCourseName}
+              placeholder={
+                mode === "Timetable"
+                  ? "ห้องเรียน (เช่น 1205)"
+                  : "ห้องสอบ (เช่น 1205)"
+              }
+              value={room}
+              onChangeText={setRoom}
             />
+
+            {/* Day Selector (Course Mode) */}
+            {mode === "Timetable" && (
+              <View style={styles.daySelectorContainer}>
+                {DAYS_SHORT.map((d, index) => (
+                  <TouchableOpacity
+                    key={d}
+                    style={[
+                      styles.daySelectBtn,
+                      targetDay === d && styles.activeDaySelectBtn,
+                    ]}
+                    onPress={() => setTargetDay(d)}
+                  >
+                    <Text
+                      style={[
+                        styles.daySelectText,
+                        targetDay === d && styles.activeDaySelectText,
+                      ]}
+                    >
+                      {THAI_DAY_LABELS[index]}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Date Picker (For Exam OR Makeup) */}
+            {(mode === "Exam" || mode === "Makeup") && (
+              <TouchableOpacity
+                style={styles.datePickerBtn}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Text style={styles.datePickerText}>
+                  {mode === "Exam" ? "วันที่สอบ: " : "วันที่ชดเชย: "}
+                  {formatDate(examDate)}
+                </Text>
+                <Ionicons name="calendar-outline" size={20} color="#00695C" />
+              </TouchableOpacity>
+            )}
+
             <View style={styles.timePickerContainer}>
               <TouchableOpacity
                 onPress={() => setShowStartPicker(true)}
@@ -511,32 +886,77 @@ const Timetable = () => {
                 </Text>
               </TouchableOpacity>
             </View>
+
             <TimePickerModal
               visible={showStartPicker}
               onClose={() => setShowStartPicker(false)}
               onTimeSelected={onChangeStart}
+              initialTime={startTime}
             />
             <TimePickerModal
               visible={showEndPicker}
               onClose={() => setShowEndPicker(false)}
               onTimeSelected={onChangeEnd}
+              initialTime={endTime}
             />
+
+            <DatePickerModal
+              visible={showDatePicker}
+              onClose={() => setShowDatePicker(false)}
+              onDateSelected={setExamDate}
+              initialDate={examDate}
+            />
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnCancel]}
-                onPress={() => setModalVisible(false)}
+                onPress={() => {
+                  setModalVisible(false);
+                  if (mode === "Makeup") setMode("Timetable");
+                }}
               >
                 <Text style={styles.modalBtnCancelText}>ยกเลิก</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.modalBtnConfirm]}
-                onPress={handleAddCourse}
+                onPress={handleAdd}
               >
                 <Text style={styles.modalBtnConfirmText}>เพิ่ม</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
+        {/* Subject Selector Modal (Nested) */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={showSubjectSelector}
+          onRequestClose={() => setShowSubjectSelector(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.selectorModalContainer}>
+              <Text style={styles.selectorTitle}>เลือกวิชา</Text>
+              <ScrollView style={{ maxHeight: 300, width: "100%" }}>
+                {uniqueSubjects.map((subject, index) => (
+                  <TouchableOpacity
+                    key={index}
+                    style={styles.subjectItem}
+                    onPress={() => handleSelectSubject(subject)}
+                  >
+                    <Text style={styles.subjectCode}>{subject.code}</Text>
+                    <Text style={styles.subjectName}>{subject.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              <TouchableOpacity
+                style={styles.closeSelectorBtn}
+                onPress={() => setShowSubjectSelector(false)}
+              >
+                <Text style={styles.closeSelectorText}>ปิด</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
       </Modal>
     </View>
   );
@@ -828,6 +1248,134 @@ const styles = StyleSheet.create({
   modalBtnConfirmText: {
     color: "#fff",
     fontWeight: "bold",
+  },
+  daySelectorContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: 15,
+  },
+  daySelectBtn: {
+    width: 35,
+    height: 35,
+    borderRadius: 17.5,
+    backgroundColor: "#F5F5F5",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  activeDaySelectBtn: {
+    backgroundColor: "#00695C",
+    borderColor: "#00695C",
+  },
+  daySelectText: {
+    fontSize: 12,
+    color: "#666",
+  },
+  activeDaySelectText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  datePickerBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#E0F2F1",
+    padding: 12,
+    borderRadius: 10,
+    width: "100%",
+    marginBottom: 15,
+  },
+  datePickerText: {
+    fontSize: 16,
+    color: "#00695C",
+    fontWeight: "bold",
+  },
+  subjectSelectorBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 15,
+    height: 45,
+  },
+  subjectSelectorTextPlaceholder: {
+    color: "#999",
+    fontSize: 16,
+  },
+  subjectSelectorTextSelected: {
+    color: "#000",
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  selectorModalContainer: {
+    width: "80%",
+    backgroundColor: "#fff",
+    borderRadius: 15,
+    padding: 20,
+    alignItems: "center",
+    maxHeight: "60%",
+  },
+  selectorTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 15,
+  },
+  subjectItem: {
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+    width: "100%",
+  },
+  subjectCode: {
+    fontSize: 12,
+    color: "#666",
+    marginBottom: 4,
+  },
+  subjectName: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  closeSelectorBtn: {
+    marginTop: 15,
+    padding: 10,
+  },
+  closeSelectorText: {
+    color: "#666",
+    fontSize: 16,
+    fontWeight: "bold",
+  },
+  addBtnInline: {
+    flexDirection: "row",
+    backgroundColor: "#00695C",
+    marginHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 40,
+    padding: 15,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  addBtnInlineText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 16,
+    marginLeft: 10,
   },
 });
 

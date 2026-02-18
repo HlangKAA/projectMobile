@@ -82,6 +82,9 @@ export const AppProvider = ({ children }) => {
     },
   ]);
 
+  // Initial Mock Data for Makeup Classes or Make-up
+  const [makeupClasses, setMakeupClasses] = useState([]);
+
   // Initial Mock Data for Study Plan
   const [studyPlan, setStudyPlan] = useState([
     { id: 1, title: "เขียนสรุปวิชา Mobile Application", completed: true },
@@ -107,6 +110,26 @@ export const AppProvider = ({ children }) => {
 
   const addExam = (exam) => {
     setExams([...exams, exam]);
+  };
+
+  const deleteCourse = (id) => {
+    setCourses(courses.filter((c) => c.id !== id));
+  };
+
+  const deleteExam = (id) => {
+    setExams(exams.filter((e) => e.id !== id));
+  };
+
+  const addMakeupClass = (cls) => {
+    setMakeupClasses([...makeupClasses, cls]);
+  };
+
+  const deleteMakeupClass = (id) => {
+    setMakeupClasses(makeupClasses.filter((c) => c.id !== id));
+  };
+
+  const clearStudyPlan = () => {
+    setStudyPlan([]);
   };
 
   const toggleStudyPlanItem = (id) => {
@@ -136,8 +159,15 @@ export const AppProvider = ({ children }) => {
         activities,
         addActivity,
         exams,
+        exams,
         addExam,
+        deleteCourse,
+        deleteExam,
+        makeupClasses,
+        addMakeupClass,
+        deleteMakeupClass,
         studyPlan,
+        clearStudyPlan,
         toggleStudyPlanItem,
         addStudyTask,
       }}

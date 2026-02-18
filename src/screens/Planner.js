@@ -39,6 +39,9 @@ const THAI_MONTHS = [
   "ธันวาคม",
 ];
 
+const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const THAI_DAY_LABELS = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
+
 const Planner = () => {
   const {
     activities,
@@ -46,6 +49,7 @@ const Planner = () => {
     studyPlan,
     toggleStudyPlanItem,
     addStudyTask,
+    clearStudyPlan,
     simulatedDate,
   } = useContext(AppContext);
 
@@ -176,10 +180,20 @@ const Planner = () => {
         {/* Study Plan Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>แผนการอ่านหนังสือ</Text>
-            <TouchableOpacity onPress={() => setShowAddTaskModal(true)}>
-              <Text style={styles.addText}>+ เพิ่มงาน</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>แผนการทำงาน</Text>
+            <View style={{ flexDirection: "row" }}>
+              <TouchableOpacity
+                onPress={clearStudyPlan}
+                style={{ marginRight: 15 }}
+              >
+                <Text style={[styles.addText, { color: "#D32F2F" }]}>
+                  ล้างทั้งหมด
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowAddTaskModal(true)}>
+                <Text style={styles.addText}>+ เพิ่มงาน</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {studyPlan.map((task) => (
@@ -231,13 +245,16 @@ const Planner = () => {
         </View>
       </ScrollView>
 
-      {/* FAB */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setModalVisible(true)}
-      >
-        <Ionicons name="add" size={30} color="#fff" />
-      </TouchableOpacity>
+      {/* Inline Add Activity Button (replacing FAB) */}
+      <View style={{ paddingBottom: 20 }}>
+        <TouchableOpacity
+          style={styles.addBtnInline}
+          onPress={() => setModalVisible(true)}
+        >
+          <Ionicons name="add-circle" size={24} color="#fff" />
+          <Text style={styles.addBtnInlineText}>เพิ่มกิจกรรม</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Add Activity Modal */}
       <Modal
@@ -257,23 +274,23 @@ const Planner = () => {
             />
 
             <Text style={styles.label}>เลือกวัน:</Text>
-            <View style={styles.daySelector}>
-              {days.map((day) => (
+            <View style={styles.daySelectorContainer}>
+              {DAYS_SHORT.map((day, index) => (
                 <TouchableOpacity
                   key={day}
                   style={[
-                    styles.dayButton,
-                    selectedDay === day && styles.selectedDayButton,
+                    styles.daySelectBtn,
+                    selectedDay === day && styles.activeDaySelectBtn,
                   ]}
                   onPress={() => setSelectedDay(day)}
                 >
                   <Text
                     style={[
-                      styles.dayButtonText,
-                      selectedDay === day && styles.selectedDayButtonText,
+                      styles.daySelectText,
+                      selectedDay === day && styles.activeDaySelectText,
                     ]}
                   >
-                    {day}
+                    {THAI_DAY_LABELS[index]}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -604,27 +621,31 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#333",
   },
-  daySelector: {
+  daySelectorContainer: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
+    justifyContent: "space-between",
+    width: "100%",
     marginBottom: 15,
-    gap: 6,
   },
-  dayButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: "#F0F0F0",
+  daySelectBtn: {
+    width: 35,
+    height: 35,
+    borderRadius: 17.5,
+    backgroundColor: "#F5F5F5",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
   },
-  selectedDayButton: {
+  activeDaySelectBtn: {
     backgroundColor: "#00695C",
+    borderColor: "#00695C",
   },
-  dayButtonText: {
-    color: "#333",
+  daySelectText: {
     fontSize: 12,
+    color: "#666",
   },
-  selectedDayButtonText: {
+  activeDaySelectText: {
     color: "#fff",
     fontWeight: "bold",
   },
@@ -652,6 +673,28 @@ const styles = StyleSheet.create({
   modalBtnConfirmText: {
     color: "#fff",
     fontWeight: "bold",
+  },
+  addBtnInline: {
+    flexDirection: "row",
+    backgroundColor: "#00695C",
+    marginHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 20,
+    padding: 15,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  addBtnInlineText: {
+    color: "#fff",
+    fontWeight: "bold",
+    fontSize: 16,
+    marginLeft: 10,
   },
 });
 

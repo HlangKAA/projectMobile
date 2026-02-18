@@ -8,31 +8,45 @@ import {
   ScrollView,
 } from "react-native";
 
-const TimePickerModal = ({ visible, onClose, onTimeSelected, initialTime }) => {
-  const hours = Array.from({ length: 24 }, (_, i) =>
-    i.toString().padStart(2, "0"),
-  );
-  const minutes = Array.from({ length: 60 }, (_, i) =>
-    i.toString().padStart(2, "0"),
-  );
+const THAI_MONTHS = [
+  "มกราคม",
+  "กุมภาพันธ์",
+  "มีนาคม",
+  "เมษายน",
+  "พฤษภาคม",
+  "มิถุนายน",
+  "กรกฎาคม",
+  "สิงหาคม",
+  "กันยายน",
+  "ตุลาคม",
+  "พฤศจิกายน",
+  "ธันวาคม",
+];
 
-  const [selectedHour, setSelectedHour] = useState("09");
-  const [selectedMinute, setSelectedMinute] = useState("00");
+const DatePickerModal = ({ visible, onClose, onDateSelected, initialDate }) => {
+  const days = Array.from({ length: 31 }, (_, i) => (i + 1).toString());
+  const years = Array.from({ length: 10 }, (_, i) => (2024 + i).toString());
+
+  const [selectedDay, setSelectedDay] = useState("1");
+  const [selectedMonthIndex, setSelectedMonthIndex] = useState(0);
+  const [selectedYear, setSelectedYear] = useState("2024");
 
   useEffect(() => {
-    if (visible && initialTime) {
-      const h = initialTime.getHours().toString().padStart(2, "0");
-      const m = initialTime.getMinutes().toString().padStart(2, "0");
-      setSelectedHour(h);
-      setSelectedMinute(m);
+    if (visible && initialDate) {
+      setSelectedDay(initialDate.getDate().toString());
+      setSelectedMonthIndex(initialDate.getMonth());
+      setSelectedYear(initialDate.getFullYear().toString());
     }
-  }, [visible, initialTime]);
+  }, [visible, initialDate]);
 
   const handleConfirm = () => {
-    const date = new Date();
-    date.setHours(parseInt(selectedHour));
-    date.setMinutes(parseInt(selectedMinute));
-    onTimeSelected(date);
+    // Note: Month is 0-indexed in Date constructor
+    const date = new Date(
+      parseInt(selectedYear),
+      selectedMonthIndex,
+      parseInt(selectedDay),
+    );
+    onDateSelected(date);
     onClose();
   };
 
@@ -45,63 +59,90 @@ const TimePickerModal = ({ visible, onClose, onTimeSelected, initialTime }) => {
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContainer}>
-          <Text style={styles.title}>Select Time</Text>
+          <Text style={styles.title}>เลือกวันที่</Text>
 
           <View style={styles.pickerContainer}>
-            {/* Hours */}
+            {/* Day */}
             <View style={styles.column}>
-              <Text style={styles.columnHeader}>Hour</Text>
+              <Text style={styles.columnHeader}>วัน</Text>
               <ScrollView
                 style={styles.scrollList}
                 showsVerticalScrollIndicator={false}
               >
-                {hours.map((hour) => (
+                {days.map((day) => (
                   <TouchableOpacity
-                    key={hour}
+                    key={day}
                     style={[
                       styles.item,
-                      selectedHour === hour && styles.selectedItem,
+                      selectedDay === day && styles.selectedItem,
                     ]}
-                    onPress={() => setSelectedHour(hour)}
+                    onPress={() => setSelectedDay(day)}
                   >
                     <Text
                       style={[
                         styles.itemText,
-                        selectedHour === hour && styles.selectedItemText,
+                        selectedDay === day && styles.selectedItemText,
                       ]}
                     >
-                      {hour}
+                      {day}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
             </View>
 
-            <Text style={styles.separator}>:</Text>
-
-            {/* Minutes */}
-            <View style={styles.column}>
-              <Text style={styles.columnHeader}>Minute</Text>
+            {/* Month */}
+            <View style={[styles.column, { flex: 2 }]}>
+              <Text style={styles.columnHeader}>เดือน</Text>
               <ScrollView
                 style={styles.scrollList}
                 showsVerticalScrollIndicator={false}
               >
-                {minutes.map((minute) => (
+                {THAI_MONTHS.map((month, index) => (
                   <TouchableOpacity
-                    key={minute}
+                    key={month}
                     style={[
                       styles.item,
-                      selectedMinute === minute && styles.selectedItem,
+                      selectedMonthIndex === index && styles.selectedItem,
                     ]}
-                    onPress={() => setSelectedMinute(minute)}
+                    onPress={() => setSelectedMonthIndex(index)}
                   >
                     <Text
                       style={[
                         styles.itemText,
-                        selectedMinute === minute && styles.selectedItemText,
+                        selectedMonthIndex === index && styles.selectedItemText,
                       ]}
                     >
-                      {minute}
+                      {month}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Year */}
+            <View style={styles.column}>
+              <Text style={styles.columnHeader}>ปี</Text>
+              <ScrollView
+                style={styles.scrollList}
+                showsVerticalScrollIndicator={false}
+              >
+                {years.map((year) => (
+                  <TouchableOpacity
+                    key={year}
+                    style={[
+                      styles.item,
+                      selectedYear === year && styles.selectedItem,
+                    ]}
+                    onPress={() => setSelectedYear(year)}
+                  >
+                    <Text
+                      style={[
+                        styles.itemText,
+                        selectedYear === year && styles.selectedItemText,
+                      ]}
+                    >
+                      {year}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -111,13 +152,13 @@ const TimePickerModal = ({ visible, onClose, onTimeSelected, initialTime }) => {
 
           <View style={styles.buttonRow}>
             <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-              <Text style={styles.cancelText}>Cancel</Text>
+              <Text style={styles.cancelText}>ยกเลิก</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.confirmButton}
               onPress={handleConfirm}
             >
-              <Text style={styles.confirmText}>Confirm</Text>
+              <Text style={styles.confirmText}>ตกลง</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -134,12 +175,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalContainer: {
-    width: "85%",
+    width: "90%",
     backgroundColor: "white",
     borderRadius: 20,
     padding: 20,
     alignItems: "center",
     elevation: 10,
+    maxHeight: "60%",
   },
   title: {
     fontSize: 18,
@@ -149,49 +191,49 @@ const styles = StyleSheet.create({
   },
   pickerContainer: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "stretch",
     justifyContent: "center",
     height: 200,
     width: "100%",
+    marginBottom: 20,
   },
   column: {
     flex: 1,
     alignItems: "center",
     height: "100%",
+    marginHorizontal: 2,
   },
   columnHeader: {
     fontWeight: "bold",
     marginBottom: 5,
     color: "#666",
+    fontSize: 12,
   },
   scrollList: {
     width: "100%",
+    backgroundColor: "#F5F5F5",
+    borderRadius: 10,
   },
   item: {
     paddingVertical: 10,
     alignItems: "center",
+    justifyContent: "center",
   },
   selectedItem: {
     backgroundColor: "#E0F2F1",
-    borderRadius: 10,
-    width: "80%",
+    borderRadius: 8,
   },
   itemText: {
-    fontSize: 18,
+    fontSize: 16,
     color: "#333",
   },
   selectedItemText: {
     color: "#00695C",
     fontWeight: "bold",
   },
-  separator: {
-    fontSize: 30,
-    fontWeight: "bold",
-    paddingHorizontal: 10,
-  },
   buttonRow: {
     flexDirection: "row",
-    marginTop: 20,
+    marginTop: 10,
     width: "100%",
     justifyContent: "space-between",
   },
@@ -221,4 +263,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default TimePickerModal;
+export default DatePickerModal;
