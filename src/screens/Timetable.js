@@ -9,6 +9,7 @@ import {
   Modal,
   TextInput,
   Button,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -16,7 +17,7 @@ import TimePickerModal from "../components/TimePickerModal";
 import DatePickerModal from "../components/DatePickerModal";
 import { AppContext } from "../context/AppContext";
 import {
-  isOverlapping,
+  findConflicts,
   isTimeCurrent,
   isTimeUpcoming,
 } from "../utils/timeUtils";
@@ -50,6 +51,7 @@ const Timetable = () => {
     addMakeupClass,
     deleteMakeupClass,
     simulatedDate,
+    userProfile,
   } = useContext(AppContext);
 
   const [mode, setMode] = useState("Timetable");
@@ -57,6 +59,7 @@ const Timetable = () => {
   const [newCourseName, setNewCourseName] = useState("");
   const [newCourseCode, setNewCourseCode] = useState("");
   const [room, setRoom] = useState("");
+  const [courseType, setCourseType] = useState("Lecture"); // "Lecture" = บรรยาย, "Lab" = ปฏิบัติ
 
   // Time Picker State
   const [startTime, setStartTime] = useState(new Date());
@@ -172,19 +175,18 @@ const Timetable = () => {
 
       addMakeupClass(newMakeup);
       Alert.alert("สำเร็จ", "เพิ่มเรียนชดเชยเรียบร้อย");
-
-      setModalVisible(false);
-      setNewCourseName("");
-      setNewCourseCode("");
-      setRoom("");
-      return;
-    }
-
-    if (mode === "Timetable") {
-      // Add Course
+    } else if (mode === "Timetable") {
+      // Add Course — check for conflicts with existing courses on this day
       const dayCourses = courses.filter((c) => c.day === targetDay);
-      if (isOverlapping(timeRange, dayCourses)) {
-        Alert.alert("Conflict", "เวลานี้ซ้อนทับกับวิชาที่มีอยู่");
+      const conflicts = findConflicts(timeRange, dayCourses);
+      if (conflicts.length > 0) {
+        const conflictNames = conflicts
+          .map((c) => `• ${c.name} (${c.time})`)
+          .join("\n");
+        Alert.alert(
+          "⚠️ เวลาซ้อนทับ",
+          `ไม่สามารถเพิ่มวิชาได้ เนื่องจากเวลาทับซ้อนกับ:\n\n${conflictNames}`,
+        );
         return;
       }
 
@@ -195,6 +197,7 @@ const Timetable = () => {
         time: timeRange,
         room: room,
         day: targetDay,
+        courseType: courseType,
       };
       addCourse(newCourse);
       Alert.alert("สำเร็จ", "เพิ่มวิชาเรียนเรียบร้อย");
@@ -222,13 +225,29 @@ const Timetable = () => {
     setNewCourseName("");
     setNewCourseCode("");
     setRoom("");
+    setCourseType("Lecture");
+    if (mode === "Makeup") {
+      setMode("Timetable");
+    }
   };
 
   const handleSelectSubject = (course) => {
     setNewCourseName(course.name);
     setNewCourseCode(course.code);
-    // setRoom(course.room || ""); // Auto-fill disabled
     setShowSubjectSelector(false);
+  };
+
+  // Guard: validate that courses exist before opening subject selector
+  const openSubjectSelector = () => {
+    if (courses.length === 0) {
+      Alert.alert(
+        "⚠️ ยังไม่มีวิชาเรียน",
+        "กรุณาเพิ่มวิชาเรียนในตารางเรียนก่อน แล้วค่อยเพิ่มเรียนชดเชยหรือตารางสอบ",
+        [{ text: "ตกลง" }],
+      );
+      return;
+    }
+    setShowSubjectSelector(true);
   };
 
   const onChangeStart = (selectedDate) => {
@@ -279,11 +298,14 @@ const Timetable = () => {
       .filter((c) => c.day === selectedDay)
       .map((c) => ({ ...c, type: "regular" }));
 
-    // 2. Makeup classes for this specific date
-    const y = simulatedDate.getFullYear();
-    const m = (simulatedDate.getMonth() + 1).toString().padStart(2, "0");
-    const d = simulatedDate.getDate().toString().padStart(2, "0");
-    const dateStr = `${y}-${m}-${d}`;
+    // 2. Makeup classes for the DATE specifically selected in the calendar strip
+    const selectedDateObj =
+      calendarWeek.find((d) => d.key === selectedDay)?.fullDate ||
+      simulatedDate;
+    const y = selectedDateObj.getFullYear();
+    const m = (selectedDateObj.getMonth() + 1).toString().padStart(2, "0");
+    const dStr = selectedDateObj.getDate().toString().padStart(2, "0");
+    const dateStr = `${y}-${m}-${dStr}`;
 
     const makeups = makeupClasses
       .filter((m) => m.dateString === dateStr)
@@ -299,10 +321,10 @@ const Timetable = () => {
       })
       .sort((a, b) => a.startMin - b.startMin);
     return all;
-  }, [courses, makeupClasses, selectedDay, simulatedDate]);
+  }, [courses, makeupClasses, selectedDay, simulatedDate, calendarWeek]);
 
   const nowStudying = todayCourses.find((c) => isTimeCurrent(c.time));
-  const nextCourses = todayCourses.filter((c) => isTimeUpcoming(c.time));
+  const otherCourses = todayCourses.filter((c) => c.id !== nowStudying?.id);
 
   // ---- Exam Mode Data (from context) ----
   const examData = useMemo(() => {
@@ -374,9 +396,16 @@ const Timetable = () => {
       <View style={styles.header}>
         <Text style={styles.appTitle}>StudySync</Text>
         <View style={styles.headerRight}>
-          <Text style={styles.userName}>น.วรัทภพ</Text>
+          <Text style={styles.userName}>น.{userProfile?.firstName || ""}</Text>
           <View style={styles.avatarSmall}>
-            <Ionicons name="person" size={16} color="#006D6D" />
+            {userProfile?.profileUrl ? (
+              <Image
+                source={{ uri: userProfile.profileUrl }}
+                style={{ width: 32, height: 32, borderRadius: 16 }}
+              />
+            ) : (
+              <Ionicons name="person" size={16} color="#006D6D" />
+            )}
           </View>
         </View>
       </View>
@@ -488,10 +517,47 @@ const Timetable = () => {
                       />
                       <View style={{ flex: 1, padding: 15 }}>
                         <View style={styles.cardHeader}>
-                          <View style={styles.codeBadge}>
-                            <Text style={styles.codeText}>
-                              {nowStudying.code}
-                            </Text>
+                          <View
+                            style={{
+                              flexDirection: "row",
+                              gap: 8,
+                              alignItems: "center",
+                            }}
+                          >
+                            <View style={styles.codeBadge}>
+                              <Text style={styles.codeText}>
+                                {nowStudying.code}
+                              </Text>
+                            </View>
+                            {nowStudying.courseType && (
+                              <View
+                                style={[
+                                  styles.codeBadge,
+                                  {
+                                    backgroundColor:
+                                      nowStudying.courseType === "Lab"
+                                        ? "#B3E5FC"
+                                        : "#D1C4E9",
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.codeText,
+                                    {
+                                      color:
+                                        nowStudying.courseType === "Lab"
+                                          ? "#0277BD"
+                                          : "#333",
+                                    },
+                                  ]}
+                                >
+                                  {nowStudying.courseType === "Lab"
+                                    ? "ปฏิบัติ"
+                                    : "บรรยาย"}
+                                </Text>
+                              </View>
+                            )}
                           </View>
                           <Text style={styles.timeText}>
                             {nowStudying.time} น.
@@ -502,26 +568,41 @@ const Timetable = () => {
                         </Text>
                         <Text style={styles.roomText}>{nowStudying.room}</Text>
                       </View>
+                      <TouchableOpacity
+                        style={styles.cardDeleteBtn}
+                        onPress={() =>
+                          confirmDelete(
+                            nowStudying,
+                            nowStudying.type === "makeup" ? "makeup" : "course",
+                          )
+                        }
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={20}
+                          color="#EF5350"
+                        />
+                      </TouchableOpacity>
                     </TouchableOpacity>
                   </View>
                 </View>
               </View>
             )}
 
-            {/* Next Subjects */}
+            {/* Other Subjects */}
             <View style={styles.section}>
               <View style={styles.sectionHeaderRow}>
                 <View style={styles.dot} />
-                <Text style={styles.sectionTitle}>วิชาถัดไป</Text>
+                <Text style={styles.sectionTitle}>วิชาเรียนในวันนี้</Text>
               </View>
 
-              {nextCourses.length > 0
-                ? nextCourses.map((c, index) => (
+              {otherCourses.length > 0
+                ? otherCourses.map((c, index) => (
                     <View key={c.id} style={styles.timelineRow}>
                       <View
                         style={[
                           styles.timelineLine,
-                          index === nextCourses.length - 1 && {
+                          index === otherCourses.length - 1 && {
                             backgroundColor: "transparent",
                           },
                         ]}
@@ -563,27 +644,83 @@ const Timetable = () => {
                         />
                         <View style={styles.cardContent}>
                           <View style={styles.cardHeader}>
-                            <View style={styles.codeBadge}>
-                              <Text style={styles.codeText}>{c.code}</Text>
+                            <View
+                              style={{
+                                flexDirection: "row",
+                                gap: 8,
+                                alignItems: "center",
+                              }}
+                            >
+                              <View style={styles.codeBadge}>
+                                <Text style={styles.codeText}>{c.code}</Text>
+                              </View>
+                              {c.courseType && (
+                                <View
+                                  style={[
+                                    styles.codeBadge,
+                                    {
+                                      backgroundColor:
+                                        c.courseType === "Lab"
+                                          ? "#B3E5FC"
+                                          : "#D1C4E9",
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.codeText,
+                                      {
+                                        color:
+                                          c.courseType === "Lab"
+                                            ? "#0277BD"
+                                            : "#333",
+                                      },
+                                    ]}
+                                  >
+                                    {c.courseType === "Lab"
+                                      ? "ปฏิบัติ"
+                                      : "บรรยาย"}
+                                  </Text>
+                                </View>
+                              )}
                             </View>
                             <Text style={styles.timeText}>{c.time} น.</Text>
                           </View>
                           <Text style={styles.courseName}>{c.name}</Text>
                           <Text style={styles.roomText}>{c.room}</Text>
                         </View>
+                        <TouchableOpacity
+                          style={styles.cardDeleteBtn}
+                          onPress={() =>
+                            confirmDelete(
+                              c,
+                              c.type === "makeup" ? "makeup" : "course",
+                            )
+                          }
+                        >
+                          <Ionicons
+                            name="trash-outline"
+                            size={20}
+                            color="#EF5350"
+                          />
+                        </TouchableOpacity>
                       </TouchableOpacity>
                     </View>
                   ))
                 : !nowStudying && (
-                    <Text
-                      style={{
-                        textAlign: "center",
-                        color: "#999",
-                        marginTop: 20,
-                      }}
-                    >
-                      ไม่มีเรียนในวันนี้
-                    </Text>
+                    <View style={styles.emptyStateCard}>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={40}
+                        color="#B0BEC5"
+                      />
+                      <Text style={styles.emptyStateTitle}>
+                        ไม่มีวิชาเรียนในวันนี้
+                      </Text>
+                      <Text style={styles.emptyStateSubtitle}>
+                        กด "เพิ่มวิชาเรียน" เพื่อเพิ่มตารางเรียน
+                      </Text>
+                    </View>
                   )}
             </View>
           </>
@@ -630,6 +767,16 @@ const Timetable = () => {
                         <Text style={styles.courseName}>{exam.name}</Text>
                         <Text style={styles.roomText}>{exam.room}</Text>
                       </View>
+                      <TouchableOpacity
+                        style={styles.cardDeleteBtn}
+                        onPress={() => confirmDelete(exam, "exam")}
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={20}
+                          color="#EF5350"
+                        />
+                      </TouchableOpacity>
                     </TouchableOpacity>
                   </View>
                 ))
@@ -698,6 +845,12 @@ const Timetable = () => {
                           {exam.room}
                         </Text>
                       </View>
+                      <TouchableOpacity
+                        style={[styles.cardDeleteBtn, { opacity: 0.6 }]}
+                        onPress={() => confirmDelete(exam, "exam")}
+                      >
+                        <Ionicons name="trash-outline" size={20} color="#888" />
+                      </TouchableOpacity>
                     </TouchableOpacity>
                   </View>
                 ))}
@@ -779,7 +932,7 @@ const Timetable = () => {
             {mode === "Makeup" ? (
               <TouchableOpacity
                 style={styles.subjectSelectorBtn}
-                onPress={() => setShowSubjectSelector(true)}
+                onPress={openSubjectSelector}
               >
                 <Text
                   style={
@@ -795,7 +948,7 @@ const Timetable = () => {
             ) : mode === "Exam" ? (
               <TouchableOpacity
                 style={styles.subjectSelectorBtn}
-                onPress={() => setShowSubjectSelector(true)}
+                onPress={openSubjectSelector}
               >
                 <Text
                   style={
@@ -806,7 +959,7 @@ const Timetable = () => {
                 >
                   {newCourseName
                     ? `${newCourseCode} ${newCourseName}`
-                    : "เลือกวิชาที่เรียน"}
+                    : "เลือกวิชาที่สอบ"}
                 </Text>
                 <Ionicons name="chevron-down" size={20} color="#666" />
               </TouchableOpacity>
@@ -828,6 +981,63 @@ const Timetable = () => {
               value={room}
               onChangeText={setRoom}
             />
+
+            {/* Course Type Selector (Course Mode) */}
+            {mode === "Timetable" && (
+              <View style={styles.courseTypeContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.courseTypeBtn,
+                    courseType === "Lecture" && styles.courseTypeBtnActive,
+                  ]}
+                  onPress={() => setCourseType("Lecture")}
+                >
+                  <Ionicons
+                    name={
+                      courseType === "Lecture"
+                        ? "radio-button-on"
+                        : "radio-button-off"
+                    }
+                    size={18}
+                    color={courseType === "Lecture" ? "#00695C" : "#999"}
+                  />
+                  <Text
+                    style={[
+                      styles.courseTypeText,
+                      courseType === "Lecture" && styles.courseTypeTextActive,
+                    ]}
+                  >
+                    บรรยาย
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.courseTypeBtn,
+                    courseType === "Lab" && styles.courseTypeBtnActive,
+                  ]}
+                  onPress={() => setCourseType("Lab")}
+                >
+                  <Ionicons
+                    name={
+                      courseType === "Lab"
+                        ? "radio-button-on"
+                        : "radio-button-off"
+                    }
+                    size={18}
+                    color={courseType === "Lab" ? "#00695C" : "#999"}
+                  />
+                  <Text
+                    style={[
+                      styles.courseTypeText,
+                      courseType === "Lab" && styles.courseTypeTextActive,
+                    ]}
+                  >
+                    ปฏิบัติ
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
 
             {/* Day Selector (Course Mode) */}
             {mode === "Timetable" && (
@@ -1200,6 +1410,43 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     fontSize: 16,
   },
+  cardDeleteBtn: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
+    padding: 8,
+    zIndex: 10,
+  },
+  courseTypeContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
+    marginBottom: 15,
+    gap: 10,
+  },
+  courseTypeBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 10,
+    gap: 8,
+  },
+  courseTypeBtnActive: {
+    borderColor: "#00695C",
+    backgroundColor: "#E0F2F1",
+  },
+  courseTypeText: {
+    fontSize: 14,
+    color: "#666",
+  },
+  courseTypeTextActive: {
+    color: "#00695C",
+    fontWeight: "bold",
+  },
   timePickerContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1376,6 +1623,27 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 16,
     marginLeft: 10,
+  },
+  emptyStateCard: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 30,
+    alignItems: "center",
+    marginTop: 10,
+    marginHorizontal: 5,
+    elevation: 1,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#78909C",
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyStateSubtitle: {
+    fontSize: 13,
+    color: "#90A4AE",
+    textAlign: "center",
   },
 });
 

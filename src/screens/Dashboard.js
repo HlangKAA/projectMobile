@@ -1,98 +1,166 @@
-import React, { useContext, useMemo } from "react";
+import React, { useContext, useMemo, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ImageBackground,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AppContext } from "../context/AppContext";
 
 const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const THAI_MONTHS_SHORT = [
+  "ม.ค.",
+  "ก.พ.",
+  "มี.ค.",
+  "เม.ย.",
+  "พ.ค.",
+  "มิ.ย.",
+  "ก.ค.",
+  "ส.ค.",
+  "ก.ย.",
+  "ต.ค.",
+  "พ.ย.",
+  "ธ.ค.",
+];
+const PERIOD_OPTIONS = ["วันนี้", "สัปดาห์หน้า", "เดือนหน้า"];
+
+// ── Helper: Parse "HH:MM" or "HH.MM" string to minutes ──────────────────
+const toMinutes = (str) => {
+  if (!str) return 0;
+  const s = str.replace(/\s/g, "").replace(/น\./g, "");
+  const sep = s.includes(":") ? ":" : ".";
+  const [h, m] = s.split(sep);
+  return parseInt(h || "0") * 60 + parseInt(m || "0");
+};
+
+const getStartMin = (timeStr) => {
+  const parts = (timeStr || "").replace(/\s/g, "").split("-");
+  return toMinutes(parts[0]);
+};
 
 const Dashboard = () => {
-  const { courses, studyPlan, exams, simulatedDate } = useContext(AppContext);
+  const { courses, studyPlan, exams, simulatedDate, userProfile } =
+    useContext(AppContext);
 
-  // Helper: get day name from simulatedDate
-  const todayDayName = DAYS_SHORT[simulatedDate.getDay()];
+  // ── Time-Travel period selector ────────────────────────────────────────
+  const [period, setPeriod] = useState("วันนี้");
 
-  // Current simulated time in minutes
+  // ── Derived "reference" date based on selected period ─────────────────
+  const referenceDate = useMemo(() => {
+    const base = new Date(simulatedDate);
+    base.setHours(0, 0, 0, 0);
+    if (period === "สัปดาห์หน้า") {
+      // Start of next week (Mon)
+      const dayOfWeek = base.getDay();
+      const daysToNextMon = (8 - dayOfWeek) % 7 || 7;
+      base.setDate(base.getDate() + daysToNextMon);
+    } else if (period === "เดือนหน้า") {
+      base.setMonth(base.getMonth() + 1, 1);
+    }
+    return base;
+  }, [simulatedDate, period]);
+
+  // ── Date range end ────────────────────────────────────────────────────
+  const rangeEnd = useMemo(() => {
+    const end = new Date(referenceDate);
+    if (period === "วันนี้") {
+      end.setDate(end.getDate() + 1);
+    } else if (period === "สัปดาห์หน้า") {
+      end.setDate(end.getDate() + 7);
+    } else {
+      // Next month: entire month
+      end.setMonth(end.getMonth() + 1, 1);
+    }
+    return end;
+  }, [referenceDate, period]);
+
+  // ── Day name for the reference date ──────────────────────────────────
+  const refDayName = DAYS_SHORT[referenceDate.getDay()];
+
+  // ── Today's / reference period's courses ─────────────────────────────
+  const periodCourses = useMemo(() => {
+    if (period === "วันนี้") {
+      return courses
+        .filter((c) => c.day === refDayName)
+        .map((c) => ({ ...c, startMin: getStartMin(c.time) }))
+        .sort((a, b) => a.startMin - b.startMin);
+    }
+    // For next week / next month: gather all unique days in the period and count
+    return courses; // Show all courses for summary view
+  }, [courses, refDayName, period]);
+
+  // Current simulated time in minutes (for "วันนี้" logic)
   const currentMinutes =
     simulatedDate.getHours() * 60 + simulatedDate.getMinutes();
 
-  // Today's courses sorted by start time
-  const todayCourses = useMemo(() => {
-    return courses
-      .filter((c) => c.day === todayDayName)
-      .map((c) => {
-        const timeParts = c.time.replace(/\s/g, "").split("-");
-        const [h, m] = (timeParts[0] || "0:0").split(/[:.]/);
-        const startMin = parseInt(h) * 60 + parseInt(m || "0");
-        return { ...c, startMin };
-      })
-      .sort((a, b) => a.startMin - b.startMin);
-  }, [courses, todayDayName]);
-
-  // Next class: first course starting after current simulated time, or the current one
+  // ── Next Class (วันนี้ only) ─────────────────────────────────────────
   const nextClass = useMemo(() => {
-    const upcoming = todayCourses.filter((c) => c.startMin > currentMinutes);
+    if (period !== "วันนี้") return null;
+    const upcoming = periodCourses.filter((c) => c.startMin > currentMinutes);
     if (upcoming.length > 0) return upcoming[0];
-    // If no upcoming, show the last one (might be currently studying)
-    return todayCourses.length > 0
-      ? todayCourses[todayCourses.length - 1]
+    return periodCourses.length > 0
+      ? periodCourses[periodCourses.length - 1]
       : null;
-  }, [todayCourses, currentMinutes]);
+  }, [period, periodCourses, currentMinutes]);
 
-  // Minutes until next class
   const minutesUntilNext = nextClass
     ? nextClass.startMin - currentMinutes
     : null;
 
-  // Study Plan Progress
+  // ── Study Plan Progress ───────────────────────────────────────────────
   const completedTasks = studyPlan.filter((t) => t.completed).length;
   const totalTasks = studyPlan.length;
   const progressPercent =
     totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
-  // Upcoming exams (within this week from simulated date)
+  // ── Upcoming Exams (reactive to period) ──────────────────────────────
   const upcomingExams = useMemo(() => {
-    const now = new Date(simulatedDate);
-    now.setHours(0, 0, 0, 0);
-
-    const weekEnd = new Date(now);
-    weekEnd.setDate(weekEnd.getDate() + 30); // Show exams within a month
-
+    const rangeStart = new Date(referenceDate);
     return exams
       .map((exam) => {
         const examDate = new Date(exam.date + "T00:00:00");
-        const diffTime = examDate.getTime() - now.getTime();
+        const diffTime =
+          examDate.getTime() - new Date(simulatedDate).setHours(0, 0, 0, 0);
         const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         return { ...exam, daysLeft, examDate };
       })
-      .filter((exam) => exam.daysLeft >= 0 && exam.examDate <= weekEnd)
+      .filter(
+        (exam) =>
+          exam.examDate >= rangeStart &&
+          exam.examDate < rangeEnd &&
+          exam.daysLeft >= 0,
+      )
       .sort((a, b) => a.examDate - b.examDate);
-  }, [exams, simulatedDate]);
+  }, [exams, referenceDate, rangeEnd, simulatedDate]);
 
+  // ── Week summary (สัปดาห์หน้า / เดือนหน้า) ──────────────────────────
+  const periodSummary = useMemo(() => {
+    if (period === "วันนี้") return null;
+    const totalCourses = courses.length;
+    const totalExams = upcomingExams.length;
+    const pendingTasks = studyPlan.filter((t) => !t.completed).length;
+    return { totalCourses, totalExams, pendingTasks };
+  }, [period, courses, upcomingExams, studyPlan]);
+
+  // ── Helper: Exam date display ─────────────────────────────────────────
   const getExamMonthDay = (dateStr) => {
     const d = new Date(dateStr + "T00:00:00");
-    const months = [
-      "JAN",
-      "FEB",
-      "MAR",
-      "APR",
-      "MAY",
-      "JUN",
-      "JUL",
-      "AUG",
-      "SEP",
-      "OCT",
-      "NOV",
-      "DEC",
-    ];
-    return { month: months[d.getMonth()], day: d.getDate().toString() };
+    return {
+      month: THAI_MONTHS_SHORT[d.getMonth()],
+      day: d.getDate().toString(),
+    };
   };
+
+  // ── Period label for section headings ────────────────────────────────
+  const periodLabel =
+    period === "วันนี้"
+      ? "วันนี้"
+      : period === "สัปดาห์หน้า"
+        ? "สัปดาห์หน้า"
+        : "เดือนหน้า";
 
   return (
     <ScrollView
@@ -103,23 +171,52 @@ const Dashboard = () => {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={styles.avatarCircle}>
-            <Ionicons name="person" size={24} color="#006D6D" />
+            {userProfile?.profileUrl ? (
+              <Image
+                source={{ uri: userProfile.profileUrl }}
+                style={{ width: 48, height: 48, borderRadius: 24 }}
+              />
+            ) : (
+              <Ionicons name="person" size={24} color="#006D6D" />
+            )}
           </View>
           <View>
             <Text style={styles.yearText}>ปีการศึกษา 2569</Text>
-            <Text style={styles.greeting}>สวัสดี คุณวรัทภพ</Text>
+            <Text style={styles.greeting}>
+              สวัสดี คุณ{userProfile?.firstName || ""}
+            </Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.mailButton}>
-          <Ionicons name="mail-outline" size={24} color="#333" />
-        </TouchableOpacity>
+      </View>
+
+      {/* ══ Time-Travel Period Selector (Challenge 2) ══════════════════ */}
+      <View style={styles.periodSelector}>
+        {PERIOD_OPTIONS.map((opt) => (
+          <TouchableOpacity
+            key={opt}
+            style={[
+              styles.periodPill,
+              period === opt && styles.periodPillActive,
+            ]}
+            onPress={() => setPeriod(opt)}
+          >
+            <Text
+              style={[
+                styles.periodPillText,
+                period === opt && styles.periodPillTextActive,
+              ]}
+            >
+              {opt}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Progress Card */}
       <View style={styles.section}>
         <View style={styles.progressCard}>
           <View>
-            <Text style={styles.progressTitle}>ความคืบหน้าวันนี้</Text>
+            <Text style={styles.progressTitle}>ความคืบหน้า{periodLabel}</Text>
             <Text style={styles.progressCount}>
               เสร็จสิ้น {completedTasks} จาก {totalTasks} งาน
             </Text>
@@ -134,64 +231,105 @@ const Dashboard = () => {
         </View>
       </View>
 
-      {/* Next Class */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>วิชาถัดไป</Text>
-        {nextClass ? (
-          <View style={styles.nextClassCard}>
-            <View style={styles.classImagePlaceholder}>
-              <Ionicons name="school" size={40} color="#fff" />
-              {minutesUntilNext != null && minutesUntilNext > 0 && (
-                <View style={styles.nextClassTag}>
-                  <Text style={styles.nextClassTagText}>
-                    เริ่มเรียนในอีก {minutesUntilNext} นาที
-                  </Text>
+      {/* ── วันนี้: Next Class card ──────────────────────────────────── */}
+      {period === "วันนี้" && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>วิชาถัดไป</Text>
+          {nextClass ? (
+            <View style={styles.nextClassCard}>
+              <View style={styles.classImagePlaceholder}>
+                <Ionicons name="school" size={40} color="#fff" />
+                {minutesUntilNext != null && minutesUntilNext > 0 && (
+                  <View style={styles.nextClassTag}>
+                    <Text style={styles.nextClassTagText}>
+                      เริ่มเรียนในอีก {minutesUntilNext} นาที
+                    </Text>
+                  </View>
+                )}
+                {minutesUntilNext != null && minutesUntilNext <= 0 && (
+                  <View
+                    style={[
+                      styles.nextClassTag,
+                      { backgroundColor: "#FFE082" },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.nextClassTagText, { color: "#F57F17" }]}
+                    >
+                      กำลังเรียนอยู่
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <View style={styles.classInfoContainer}>
+                <View style={styles.classHeaderRow}>
+                  <Text style={styles.className}>{nextClass.name}</Text>
                 </View>
-              )}
-              {minutesUntilNext != null && minutesUntilNext <= 0 && (
-                <View
-                  style={[styles.nextClassTag, { backgroundColor: "#FFE082" }]}
-                >
-                  <Text style={[styles.nextClassTagText, { color: "#F57F17" }]}>
-                    กำลังเรียนอยู่
-                  </Text>
+                <View style={styles.classDetailRow}>
+                  <View style={styles.detailItem}>
+                    <Ionicons name="time-outline" size={16} color="#333" />
+                    <Text style={styles.detailText}>{nextClass.time}</Text>
+                  </View>
+                  <View style={styles.detailItem}>
+                    <Ionicons name="location-outline" size={16} color="#333" />
+                    <Text style={styles.detailText}>{nextClass.room}</Text>
+                  </View>
                 </View>
-              )}
+              </View>
             </View>
-
-            <View style={styles.classInfoContainer}>
-              <View style={styles.classHeaderRow}>
-                <Text style={styles.className}>{nextClass.name}</Text>
-                <TouchableOpacity style={styles.enterClassBtn}>
-                  <Text style={styles.enterClassText}>เข้าเรียน</Text>
-                </TouchableOpacity>
+          ) : (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIconBox}>
+                <Ionicons name="school-outline" size={32} color="#B0BEC5" />
               </View>
-
-              <View style={styles.classDetailRow}>
-                <View style={styles.detailItem}>
-                  <Ionicons name="time-outline" size={16} color="#333" />
-                  <Text style={styles.detailText}>{nextClass.time}</Text>
-                </View>
-                <View style={styles.detailItem}>
-                  <Ionicons name="location-outline" size={16} color="#333" />
-                  <Text style={styles.detailText}>{nextClass.room}</Text>
-                </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.emptyTitle}>ไม่มีวิชาเรียน</Text>
+                <Text style={styles.emptyText}>ไม่มีคลาสในวัน{refDayName}</Text>
               </View>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* ── Week / Month: Summary Cards ──────────────────────────────── */}
+      {periodSummary && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>สรุป{periodLabel}</Text>
+          <View style={styles.summaryRow}>
+            <View style={[styles.summaryCard, { backgroundColor: "#E8F5E9" }]}>
+              <Ionicons name="book-outline" size={28} color="#00695C" />
+              <Text style={styles.summaryNumber}>
+                {periodSummary.totalCourses}
+              </Text>
+              <Text style={styles.summaryLabel}>วิชาเรียน</Text>
+            </View>
+            <View style={[styles.summaryCard, { backgroundColor: "#E3F2FD" }]}>
+              <Ionicons
+                name="document-text-outline"
+                size={28}
+                color="#1565C0"
+              />
+              <Text style={[styles.summaryNumber, { color: "#1565C0" }]}>
+                {periodSummary.totalExams}
+              </Text>
+              <Text style={styles.summaryLabel}>การสอบ</Text>
+            </View>
+            <View style={[styles.summaryCard, { backgroundColor: "#FFF8E1" }]}>
+              <Ionicons name="clipboard-outline" size={28} color="#F57F17" />
+              <Text style={[styles.summaryNumber, { color: "#F57F17" }]}>
+                {periodSummary.pendingTasks}
+              </Text>
+              <Text style={styles.summaryLabel}>งานค้าง</Text>
             </View>
           </View>
-        ) : (
-          <View style={styles.emptyCard}>
-            <Ionicons name="school-outline" size={24} color="#999" />
-            <Text style={styles.emptyText}>
-              ไม่มีวิชาเรียนในวัน{todayDayName}
-            </Text>
-          </View>
-        )}
-      </View>
+        </View>
+      )}
 
       {/* Upcoming Exams */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>การสอบที่ใกล้เข้ามาถึง</Text>
+        <Text style={styles.sectionTitle}>
+          การสอบ{period === "วันนี้" ? "ที่ใกล้เข้ามาถึง" : `ใน${periodLabel}`}
+        </Text>
         {upcomingExams.length > 0 ? (
           upcomingExams.map((exam) => {
             const { month, day } = getExamMonthDay(exam.date);
@@ -214,21 +352,17 @@ const Dashboard = () => {
             );
           })
         ) : (
-          <View style={styles.emptyExamCard}>
-            <View style={styles.calendarIconBox}>
-              <Ionicons name="calendar-outline" size={24} color="#999" />
+          <View style={styles.emptyCard}>
+            <View style={styles.emptyIconBox}>
+              <Ionicons name="calendar-outline" size={32} color="#B0BEC5" />
             </View>
-            <Text style={styles.emptyExamText}>
-              ไม่มีการสอบอื่นในสัปดาห์นี้
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.emptyTitle}>ไม่มีข้อมูลการสอบ</Text>
+              <Text style={styles.emptyText}>ไม่มีการสอบใน{periodLabel}</Text>
+            </View>
           </View>
         )}
       </View>
-
-      {/* FAB */}
-      <TouchableOpacity style={styles.fab}>
-        <Ionicons name="add" size={30} color="#fff" />
-      </TouchableOpacity>
     </ScrollView>
   );
 };
@@ -249,7 +383,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 20,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   headerLeft: {
     flexDirection: "row",
@@ -281,6 +415,31 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 10,
     elevation: 2,
+  },
+  /* ── Period Selector Pills (Challenge 2) ─────────────────────────── */
+  periodSelector: {
+    flexDirection: "row",
+    paddingHorizontal: 20,
+    marginBottom: 18,
+    gap: 8,
+  },
+  periodPill: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "#E0F2F1",
+    alignItems: "center",
+  },
+  periodPillActive: {
+    backgroundColor: "#00695C",
+  },
+  periodPillText: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: "#00695C",
+  },
+  periodPillTextActive: {
+    color: "#fff",
   },
   /* Progress Card */
   progressCard: {
@@ -332,13 +491,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
   },
-  /* Next Class */
+  /* Section Title */
   sectionTitle: {
     fontSize: 18,
     fontWeight: "bold",
     marginBottom: 10,
     color: "#000",
   },
+  /* Summary Row (Week / Month) */
+  summaryRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  summaryCard: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 16,
+    alignItems: "center",
+    elevation: 2,
+  },
+  summaryNumber: {
+    fontSize: 28,
+    fontWeight: "bold",
+    color: "#00695C",
+    marginTop: 6,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    color: "#555",
+    marginTop: 2,
+  },
+  /* Next Class Card */
   nextClassCard: {
     backgroundColor: "#fff",
     borderRadius: 20,
@@ -465,57 +648,33 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "bold",
   },
-  /* Empty Exam Card */
-  emptyExamCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    borderRadius: 15,
-    padding: 15,
-  },
-  calendarIconBox: {
-    width: 40,
-    height: 40,
-    backgroundColor: "#F5F5F5",
-    borderRadius: 10,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 15,
-  },
-  emptyExamText: {
-    flex: 1,
-    color: "#999",
-  },
-  /* Empty Card */
+  /* Empty card */
   emptyCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    borderRadius: 15,
+    borderRadius: 20,
     padding: 20,
     gap: 15,
+    elevation: 1,
   },
-  emptyText: {
-    color: "#999",
-    fontSize: 14,
-    flex: 1,
-  },
-  /* FAB */
-  fab: {
-    position: "absolute",
-    bottom: 90,
-    alignSelf: "center",
-    backgroundColor: "#006D6D",
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  emptyIconBox: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: "#F5F5F5",
     justifyContent: "center",
     alignItems: "center",
-    elevation: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+  },
+  emptyTitle: {
+    fontSize: 15,
+    fontWeight: "bold",
+    color: "#78909C",
+    marginBottom: 3,
+  },
+  emptyText: {
+    color: "#90A4AE",
+    fontSize: 13,
   },
 });
 

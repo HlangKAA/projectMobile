@@ -1,7 +1,7 @@
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import TabNavigator from "./src/navigation/TabNavigator";
+import RootNavigator from "./src/navigation/RootNavigator";
 import { AppProvider } from "./src/context/AppContext";
 
 export default function App() {
@@ -9,7 +9,7 @@ export default function App() {
     <SafeAreaProvider>
       <AppProvider>
         <NavigationContainer>
-          <TabNavigator />
+          <RootNavigator />
         </NavigationContainer>
       </AppProvider>
     </SafeAreaProvider>

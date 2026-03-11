@@ -8,12 +8,13 @@ import {
   Alert,
   Modal,
   TextInput,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import TimePickerModal from "../components/TimePickerModal";
 import { AppContext } from "../context/AppContext";
-import { isOverlapping } from "../utils/timeUtils";
+import { findConflicts } from "../utils/timeUtils";
 
 const THAI_DAYS = [
   "วันอาทิตย์",
@@ -46,11 +47,16 @@ const Planner = () => {
   const {
     activities,
     addActivity,
+    deleteActivity,
     studyPlan,
+    deleteStudyTask,
     toggleStudyPlanItem,
     addStudyTask,
     clearStudyPlan,
     simulatedDate,
+    userProfile,
+    courses,
+    makeupClasses,
   } = useContext(AppContext);
 
   const [modalVisible, setModalVisible] = useState(false);
@@ -105,10 +111,20 @@ const Planner = () => {
 
     const dayActivities = activities.filter((a) => a.day === selectedDay);
 
-    if (isOverlapping(timeRange, dayActivities)) {
+    // Check conflicts against courses and makeup classes on the selected day
+    const dayCourses = courses
+      .filter((c) => c.day === selectedDay)
+      .map((c) => ({ ...c, isCourse: true }));
+
+    const checkAllItems = [...dayActivities, ...dayCourses];
+    const conflicts = findConflicts(timeRange, checkAllItems);
+    if (conflicts.length > 0) {
+      const conflictNames = conflicts
+        .map((a) => `• ${a.name} (${a.time})`)
+        .join("\n");
       Alert.alert(
-        "Conflict Detected",
-        "ช่วงเวลานี้ซ้อนทับกับกิจกรรมที่มีอยู่แล้ว",
+        "⚠️ เวลาซ้อนทับ",
+        `ไม่สามารถเพิ่มกิจกรรมได้ เนื่องจากเวลาทับซ้อนกับ:\n\n${conflictNames}`,
       );
       return;
     }
@@ -148,10 +164,19 @@ const Planner = () => {
         <View style={styles.header}>
           <View>
             <Text style={styles.dateText}>{formattedDate}</Text>
-            <Text style={styles.greeting}>สวัสดี วรัทภพ</Text>
+            <Text style={styles.greeting}>
+              สวัสดี {userProfile?.firstName || ""}
+            </Text>
           </View>
           <View style={styles.avatarCircle}>
-            <Ionicons name="person" size={20} color="#B8860B" />
+            {userProfile?.profileUrl ? (
+              <Image
+                source={{ uri: userProfile.profileUrl }}
+                style={{ width: 40, height: 40, borderRadius: 20 }}
+              />
+            ) : (
+              <Ionicons name="person" size={20} color="#B8860B" />
+            )}
           </View>
         </View>
 
@@ -196,65 +221,117 @@ const Planner = () => {
             </View>
           </View>
 
-          {studyPlan.map((task) => (
-            <TouchableOpacity
-              key={task.id}
-              style={styles.taskCard}
-              onPress={() => toggleStudyPlanItem(task.id)}
-            >
-              <Ionicons
-                name={task.completed ? "checkmark-circle" : "ellipse-outline"}
-                size={24}
-                color={task.completed ? "#006D6D" : "#CCC"}
-              />
-              <Text
-                style={[
-                  styles.taskText,
-                  task.completed && styles.taskCompleted,
-                ]}
-              >
-                {task.title}
+          {studyPlan.length === 0 ? (
+            <View style={styles.emptyStateCard}>
+              <Ionicons name="clipboard-outline" size={40} color="#B0BEC5" />
+              <Text style={styles.emptyStateTitle}>ยังไม่มีแผนงาน</Text>
+              <Text style={styles.emptyStateSubtitle}>
+                กด "+ เพิ่มงาน" เพื่อเริ่มต้น
               </Text>
-            </TouchableOpacity>
-          ))}
+            </View>
+          ) : (
+            studyPlan.map((task) => (
+              <View key={task.id} style={styles.taskCard}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    flexDirection: "row",
+                    alignItems: "center",
+                  }}
+                  onPress={() => toggleStudyPlanItem(task.id)}
+                >
+                  <Ionicons
+                    name={
+                      task.completed ? "checkmark-circle" : "ellipse-outline"
+                    }
+                    size={24}
+                    color={task.completed ? "#006D6D" : "#CCC"}
+                  />
+                  <Text
+                    style={[
+                      styles.taskText,
+                      task.completed && styles.taskCompleted,
+                    ]}
+                  >
+                    {task.title}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => deleteStudyTask(task.id)}
+                  style={styles.taskDeleteBtn}
+                >
+                  <Ionicons name="trash-outline" size={18} color="#EF5350" />
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
         </View>
 
         {/* Activities Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>กิจกรรมนอกหลักสูตร</Text>
-          <View style={styles.activitiesContainer}>
-            {activities.map((activity) => (
-              <View key={activity.id} style={styles.activityCard}>
-                <View
-                  style={[
-                    styles.iconBox,
-                    { backgroundColor: activity.color + "20" },
-                  ]}
-                >
-                  <Ionicons
-                    name={activity.icon}
-                    size={28}
-                    color={activity.color}
-                  />
+          {activities.length === 0 ? (
+            <View style={styles.emptyStateCard}>
+              <Ionicons name="basketball-outline" size={40} color="#B0BEC5" />
+              <Text style={styles.emptyStateTitle}>ยังไม่มีกิจกรรม</Text>
+              <Text style={styles.emptyStateSubtitle}>
+                กด "เพิ่มกิจกรรม" ด้านล่าง
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.activitiesContainer}>
+              {activities.map((activity) => (
+                <View key={activity.id} style={styles.activityCard}>
+                  <TouchableOpacity
+                    style={styles.activityDeleteBtn}
+                    onPress={() =>
+                      Alert.alert(
+                        "ลบกิจกรรม",
+                        `ต้องการลบ "${activity.name}" ใช่หรือไม่?`,
+                        [
+                          { text: "ยกเลิก", style: "cancel" },
+                          {
+                            text: "ลบ",
+                            style: "destructive",
+                            onPress: () => deleteActivity(activity.id),
+                          },
+                        ],
+                      )
+                    }
+                  >
+                    <Ionicons name="close-circle" size={20} color="#EF5350" />
+                  </TouchableOpacity>
+                  <View
+                    style={[
+                      styles.iconBox,
+                      { backgroundColor: activity.color + "20" },
+                    ]}
+                  >
+                    <Ionicons
+                      name={activity.icon}
+                      size={28}
+                      color={activity.color}
+                    />
+                  </View>
+                  <Text style={styles.activityName}>{activity.name}</Text>
+                  <Text style={styles.activityTime}>{activity.time}</Text>
                 </View>
-                <Text style={styles.activityName}>{activity.name}</Text>
-                <Text style={styles.activityTime}>{activity.time}</Text>
-              </View>
-            ))}
+              ))}
+            </View>
+          )}
+
+          {/* Inline Add Activity Button (replacing FAB) */}
+          <View style={{ paddingTop: 20 }}>
+            <TouchableOpacity
+              style={styles.addBtnInline}
+              onPress={() => setModalVisible(true)}
+            >
+              <Ionicons name="add-circle" size={24} color="#fff" />
+              <Text style={styles.addBtnInlineText}>เพิ่มกิจกรรม</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
-
-      {/* Inline Add Activity Button (replacing FAB) */}
-      <View style={{ paddingBottom: 20 }}>
-        <TouchableOpacity
-          style={styles.addBtnInline}
-          onPress={() => setModalVisible(true)}
-        >
-          <Ionicons name="add-circle" size={24} color="#fff" />
-          <Text style={styles.addBtnInlineText}>เพิ่มกิจกรรม</Text>
-        </TouchableOpacity>
-      </View>
 
       {/* Add Activity Modal */}
       <Modal
@@ -503,6 +580,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 2,
   },
+  taskDeleteBtn: {
+    padding: 6,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
   taskText: {
     fontSize: 15,
     color: "#333",
@@ -525,6 +607,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     marginBottom: 15,
+    position: "relative",
+  },
+  activityDeleteBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    zIndex: 10,
   },
   iconBox: {
     width: 45,
@@ -543,6 +632,26 @@ const styles = StyleSheet.create({
   activityTime: {
     fontSize: 14,
     color: "#666",
+  },
+  /* Empty State */
+  emptyStateCard: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 30,
+    alignItems: "center",
+    marginTop: 5,
+    elevation: 1,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#78909C",
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  emptyStateSubtitle: {
+    fontSize: 13,
+    color: "#90A4AE",
   },
   /* FAB */
   fab: {

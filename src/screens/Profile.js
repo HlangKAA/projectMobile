@@ -9,16 +9,25 @@ import {
   Switch,
   Modal,
   TextInput,
+  Image,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
+import { doc, updateDoc } from "firebase/firestore";
 import { AppContext } from "../context/AppContext";
 import TimePickerModal from "../components/TimePickerModal";
+import { uploadImageToCloudinary } from "../config/cloudinary";
+import { db } from "../config/firebase";
 
 const Profile = () => {
-  const { simulatedDate, setSimulatedDate } = useContext(AppContext);
+  const { simulatedDate, setSimulatedDate, resetAll, userProfile, logout } =
+    useContext(AppContext);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showDateModal, setShowDateModal] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [profileImage, setProfileImage] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   // Date picker state
   const [tempDay, setTempDay] = useState(simulatedDate.getDate().toString());
@@ -37,11 +46,48 @@ const Profile = () => {
         { text: "ยกเลิก", style: "cancel" },
         {
           text: "ลบข้อมูล",
-          onPress: () => console.log("Data cleared"),
+          onPress: async () => {
+            await resetAll();
+            Alert.alert("สำเร็จ", "ล้างข้อมูลทั้งหมดเรียบร้อยแล้ว");
+          },
           style: "destructive",
         },
       ],
     );
+  };
+
+  const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert("ขออภัย", "ต้องการสิทธิ์เข้าถึงคลังภาพ");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets && result.assets[0]) {
+      const uri = result.assets[0].uri;
+      setUploadingImage(true);
+      try {
+        const url = await uploadImageToCloudinary(uri);
+        setProfileImage(url);
+        if (userProfile?.uid) {
+          await updateDoc(doc(db, "users", userProfile.uid), {
+            profileUrl: url,
+          });
+        }
+        Alert.alert("สำเร็จ", "อัปโหลดรูปโปรไฟล์เรียบร้อย!");
+      } catch (err) {
+        // If Cloudinary fails (e.g. no preset set up), just show local preview
+        setProfileImage(uri);
+        console.warn("Cloudinary upload failed, using local URI:", err.message);
+      } finally {
+        setUploadingImage(false);
+      }
+    }
   };
 
   const handleSetDate = () => {
@@ -113,39 +159,44 @@ const Profile = () => {
       {/* Profile Card */}
       <View style={styles.profileCard}>
         <View style={styles.avatarContainer}>
-          <View style={styles.avatarPlaceholder}>
-            <Ionicons name="person" size={50} color="#006D6D" />
-          </View>
+          {profileImage || userProfile?.profileUrl ? (
+            <Image
+              source={{ uri: profileImage || userProfile?.profileUrl }}
+              style={styles.avatarImage}
+            />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Ionicons name="person" size={50} color="#006D6D" />
+            </View>
+          )}
+          <TouchableOpacity
+            style={styles.changePhotoBtn}
+            onPress={handlePickImage}
+            disabled={uploadingImage}
+          >
+            {uploadingImage ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="camera" size={16} color="#fff" />
+            )}
+          </TouchableOpacity>
         </View>
-        <Text style={styles.name}>วรัทภพ ธภัทรสรุวรรณ</Text>
-        <Text style={styles.subText}>คณะศิลปศาสตร์และวิทยาศาสตร์</Text>
-        <Text style={styles.subText}>สาขา วิทยาการคอมพิวเตอร์</Text>
-
-        <TouchableOpacity style={styles.editProfileBtn}>
-          <Text style={styles.editProfileText}>แก้ไขโปรไฟล์</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Stats */}
-      <View style={styles.statsContainer}>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>เกรดเฉลี่ย</Text>
-          <Text style={styles.statVal}>3.99</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>หน่วยกิต</Text>
-          <Text style={styles.statVal}>109</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>สถานะ</Text>
-          <Text style={[styles.statVal, { color: "red", fontSize: 16 }]}>
-            NOT PASS
-          </Text>
-        </View>
+        <Text style={styles.name}>
+          {userProfile
+            ? userProfile.firstName || "ผู้ใช้งานใหม่"
+            : "กำลังโหลด..."}{" "}
+          {userProfile?.lastName || ""}
+        </Text>
+        <Text style={styles.subText}>
+          {userProfile?.faculty || "ไม่ระบุคณะ"}
+        </Text>
+        <Text style={styles.subText}>
+          สาขา {userProfile?.major || "ไม่ระบุ"}
+        </Text>
       </View>
 
       {/* Testing: Simulated Date & Time */}
-      <Text style={styles.sectionTitle}>🧪 การทดสอบ</Text>
+      <Text style={styles.sectionTitle}>การทดสอบ</Text>
       <View style={styles.settingsGroup}>
         <TouchableOpacity
           style={styles.settingItem}
@@ -176,79 +227,16 @@ const Profile = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Settings Sections */}
-      <Text style={styles.sectionTitle}>ตั้งค่าบัญชี</Text>
-      <View style={styles.settingsGroup}>
-        <TouchableOpacity style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <Ionicons name="lock-closed-outline" size={22} color="#555" />
-            <Text style={styles.settingText}>ตั้งค่าส่วนตัว</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#CCC" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <Ionicons name="notifications-outline" size={22} color="#555" />
-            <Text style={styles.settingText}>แจ้งเตือน</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#CCC" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <Ionicons name="globe-outline" size={22} color="#555" />
-            <Text style={styles.settingText}>เปลี่ยนภาษา</Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
-            <Text style={{ color: "#aaa", marginRight: 5 }}>English</Text>
-            <Ionicons name="chevron-forward" size={20} color="#CCC" />
-          </View>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.sectionTitle}>การตั้งค่าแอป</Text>
-      <View style={styles.settingsGroup}>
-        <View style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <Ionicons name="moon-outline" size={22} color="#555" />
-            <Text style={styles.settingText}>โหมดมืด</Text>
-          </View>
-          <Switch
-            value={isDarkMode}
-            onValueChange={setIsDarkMode}
-            trackColor={{ false: "#767577", true: "#006D6D" }}
-          />
-        </View>
-        <TouchableOpacity style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <Ionicons name="server-outline" size={22} color="#555" />
-            <Text style={styles.settingText}>การจัดการพื้นที่เก็บข้อมูล</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#CCC" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Support */}
-      <Text style={styles.sectionTitle}>สนับสนุน</Text>
-      <View style={styles.settingsGroup}>
-        <TouchableOpacity style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <Ionicons name="help-circle-outline" size={22} color="#555" />
-            <Text style={styles.settingText}>ศูนย์ช่วยเหลือ</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#CCC" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.settingItem}>
-          <View style={styles.settingLeft}>
-            <Ionicons
-              name="information-circle-outline"
-              size={22}
-              color="#555"
-            />
-            <Text style={styles.settingText}>เกี่ยวกับ StudySync</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#CCC" />
-        </TouchableOpacity>
-      </View>
+      {/* Logout */}
+      <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+        <Ionicons
+          name="log-out-outline"
+          size={20}
+          color="#00695C"
+          style={{ marginRight: 10 }}
+        />
+        <Text style={styles.logoutText}>ออกจากระบบ</Text>
+      </TouchableOpacity>
 
       {/* Clear Data */}
       <TouchableOpacity style={styles.clearBtn} onPress={handleClearData}>
@@ -378,6 +366,26 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: "#B2DFDB",
   },
+  avatarImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: "#B2DFDB",
+  },
+  changePhotoBtn: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    backgroundColor: "#00695C",
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: "#fff",
+  },
   name: {
     fontSize: 18,
     fontWeight: "bold",
@@ -476,6 +484,22 @@ const styles = StyleSheet.create({
   },
   clearText: {
     color: "red",
+    fontWeight: "bold",
+    fontSize: 16,
+  },
+  logoutBtn: {
+    flexDirection: "row",
+    backgroundColor: "#E0F2F1",
+    padding: 15,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: "#B2DFDB",
+  },
+  logoutText: {
+    color: "#00695C",
     fontWeight: "bold",
     fontSize: 16,
   },
